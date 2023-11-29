@@ -1,29 +1,39 @@
+use std::error::Error;
 use std::io::{self, stdout};
 use std::time;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, read},
     ExecutableCommand,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}
 };
 use ratatui::{prelude::*, widgets::*};
 use rand::prelude::*;
 
+pub struct App {
+    pub data: Vec<u64>,
+    pub should_quit: bool,
+    pub finished_sorting: bool,
+}
+
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let mut should_quit = false;
 
-    let mut data: Vec<u64> = init_data(&mut terminal);
+    let data:Vec<u64> = init_data(&mut terminal);
+    let mut app = App {data, should_quit: false, finished_sorting: true};
 
-    terminal.draw(|f| ui(f, &data)).unwrap();
+    terminal.draw(|f| ui(f, &app.data)).unwrap();
     //std::thread::sleep(time::Duration::from_millis(1000));
+        
+    visualize_sort(&mut terminal, &mut app);
 
-    visualize_sort(&mut terminal, &mut data);
-
-    while !should_quit {
-        terminal.draw(|f| ui(f, &data))?;
-        should_quit = handle_events(&mut terminal, &mut data)?;
+    loop {
+        terminal.draw(|f| ui(f, &app.data))?;
+        update(&mut terminal, &mut app)?;
+        if app.should_quit{
+            break;
+        }
     }
 
     disable_raw_mode()?;
@@ -39,8 +49,9 @@ pub fn init_data<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Ve
     rand_data(data_count.into())
 }
 
-pub fn visualize_sort<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, data: &mut Vec<u64>){
-    quicksort(data, terminal);
+pub fn visualize_sort<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App){
+        quicksort(&mut app.data, terminal);
+        app.finished_sorting = true;
 }
 
 pub fn quicksort<B: ratatui::backend::Backend>(arr: &mut [u64], terminal: &mut Terminal<B>) {
@@ -75,20 +86,26 @@ fn partition<T: Ord>(arr: &mut [T], left: isize, right: isize) -> isize {
     i + 1
 }
 
-fn handle_events<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, data: &mut Vec<u64>) -> io::Result<bool> {
-    if event::poll(std::time::Duration::from_millis(50))? {
+fn update<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+    if event::poll(std::time::Duration::from_millis(250))? {
         if let Event::Key(key) = event::read()? {
-            if key.kind == event::KeyEventKind::Press && key.code == KeyCode::Char('q') {
-                return Ok(true);
-            }
-            if key.kind == event::KeyEventKind::Press && key.code == KeyCode::Char('r') {
-                *data = init_data(terminal);
-                visualize_sort(terminal, data);
-                return Ok(false);
+            
+            if key.kind == event::KeyEventKind::Press{
+                match key.code {
+                KeyCode::Char('q') => {app.should_quit = true; return  Ok(())},
+                KeyCode::Char('r') => {
+                    //println!("r pressed : sorting? {}", app.finished_sorting.clone());
+                    app.data = init_data(terminal);
+                    app.finished_sorting = false;
+                    visualize_sort(terminal, app);
+                      
+                },
+                _ => return Ok(()),
+                }
             }
        }
     }
-    Ok(false)
+    Ok(())
 }
 
 fn rand_data(data_count: u32) -> Vec<u64> {
@@ -102,8 +119,8 @@ fn ui(frame: &mut Frame, data: &Vec<u64>) {
     let layout = Layout::default()
     .direction(Direction::Vertical)
     .constraints(vec![
-        Constraint::Percentage(20),
-        Constraint::Percentage(80),
+        Constraint::Min(3),
+        Constraint::Min(5),
                 ]).split(frame.size());
 
     frame.render_widget(BarChart::default()
